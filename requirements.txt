@@ -1,5 +1,2 @@
 flask
-whisper
-gtts
-requests
-torch
+gradio_client
