@@ -1,61 +1,35 @@
-from flask import Flask, request, jsonify, send_file
+from flask import Flask, request, jsonify
+from gradio_client import Client
 import os
-import tempfile
-import whisper
-from gtts import gTTS
-import requests
 
 app = Flask(__name__)
 
-# Load Whisper model (small model for performance)
-model = whisper.load_model("small")
+client = Client("https://coqui-xtts.hf.space/--replicas/n38lq/") #use the exact url that you found.
 
-# LibreTranslate API for translation
-LIBRETRANSLATE_URL = "https://libretranslate.de/translate"
+@app.route('/generate', methods=['POST'])
+def generate():
+    data = request.get_json()
+    text = data['text']
+    audio_url = data['audio_url'] #the url of the audio file.
 
-# Speech-to-Text using Whisper
-def speech_to_text(audio_path):
-    result = model.transcribe(audio_path)
-    return result["text"]
+    try:
+        result = client.predict(
+            text,
+            "en,en",  # Language. Adapt if needed.
+            audio_url,
+            audio_url,
+            True,
+            True,
+            True,
+            True,
+            fn_index=1,
+        )
 
-# Translate text using LibreTranslate
-def translate_text(text, source_lang, target_lang):
-    payload = {
-        "q": text,
-        "source": source_lang,
-        "target": target_lang,
-        "format": "text"
-    }
-    response = requests.post(LIBRETRANSLATE_URL, data=payload)
-    return response.json().get("translatedText", "")
+        audio_output = result[1] #get the second item from the returned tuple, which is the audio file.
+        return jsonify({'audio_output_url': audio_output}) #return the url of the generated audio.
 
-# Convert text to speech using gTTS
-def text_to_speech(text, lang):
-    tts = gTTS(text=text, lang=lang)
-    temp_audio = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
-    tts.save(temp_audio.name)
-    return temp_audio.name
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
-@app.route("/translate", methods=["POST"])
-def translate_audio():
-    if 'audio' not in request.files:
-        return jsonify({"error": "No audio file uploaded"}), 400
-    
-    audio_file = request.files['audio']
-    temp_audio = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
-    audio_file.save(temp_audio.name)
-    
-    source_lang = request.form.get("source_lang", "auto")
-    target_lang = request.form.get("target_lang")
-    
-    if not target_lang:
-        return jsonify({"error": "Target language is required"}), 400
-    
-    text = speech_to_text(temp_audio.name)
-    translated_text = translate_text(text, source_lang, target_lang)
-    audio_output = text_to_speech(translated_text, target_lang)
-    
-    return send_file(audio_output, as_attachment=True, download_name="translated_audio.mp3", mimetype="audio/mpeg")
-
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+if __name__ == '__main__':
+    app.run(debug=True, host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
